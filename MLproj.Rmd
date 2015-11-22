@@ -1,0 +1,128 @@
+---
+title: "Predict the quality of weight lifting"
+author: "Y. Ada Zhan"
+date: "November 20, 2015"
+output: html_document
+subtitle: <h3> Practical Machine Learning Course Project </h3>
+---
+
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, the goal is to predict the manner in which they did the exercise using data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. This is the "classe" variable in the training set. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.
+
+More information is available from the website here: <http://groupware.les.inf.puc-rio.br/har> (see the section on the Weight Lifting Exercise Dataset). 
+
+### Data
+
+The training data for this project are available here: 
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>
+
+The test data are available here: 
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>
+
+### Data Preparation
+
+- Download data files
+
+```{r}
+trainUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+temp <- tempfile()
+download.file(trainUrl, temp, method = "curl")
+train <- read.csv(temp, na.strings=c("NA","#DIV/0!","")) # missing values coded with "#DIV/0!", "NA" or "" are all changed to NA.
+download.file(testUrl, temp, method = "curl")
+test <- read.csv(temp, na.strings=c("NA","#DIV/0!",""))
+unlink(temp) #delete temp files
+```
+
+- Tidy datasets
+
+```{r}
+# check variables' names (column names)
+# colnames(train)
+# remove irrelavent columns i.e. columns 1 - 7 : "X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window"
+train <- train[,-c(1:7)]
+test <- test[,-c(1:7)]
+# remove columns with all missing values 
+num_NA_train <- apply(train,2,function(x) {sum(is.na(x))}) # number of NAs of every column
+num_NA_test <- apply(test,2,function(x) {sum(is.na(x))})
+train <- train[,colSums(is.na(train)) == 0]
+test <- test[,colSums(is.na(test)) == 0]
+# class into factor
+train$classe <- factor(train$classe)
+```
+
+- Partition the train dataset to allow cross validation
+
+```{r}
+library(caret)
+set.seed(123) # for reproducibility
+# Split the train dataset into a 60% subtraining and 40% subtesting datasets
+trainIndex <- createDataPartition(train$classe, p=0.6, list=FALSE)
+subtraining <- train[trainIndex,]
+subtesting <- train[-trainIndex,]
+```
+
+### Machine Learning model
+
+As suggested by Velloso et. al. [^1], it is better to use a Ramdon Forest approach due to the characteristic noise in the sensor data. 
+
+```{r}
+library(randomForest)
+library(doParallel)
+registerDoParallel(makeCluster(detectCores()))
+modfit <- randomForest(classe ~ ., method = "class", data = subtraining,importance=TRUE,ntrees=10)
+```
+
+- Evaluate the model on the subtraining dataset (in sample)
+
+```{r}
+pred_subtrain <- predict(modfit, subtraining)
+confusionMatrix(pred_subtrain, subtraining$classe)
+```
+
+The model is very good for the subtraining set itself. Next we will cross validate the model against the held out set, that is, subtesting data set.
+
+- Evaluate the model on the subtesting dataset (out of sample i.e. cross validation)
+
+```{r}
+pred_subtest <- predict(modfit, subtesting)
+confusionMatrix(pred_subtest, subtesting$classe)
+```
+
+- Out of sample error
+
+Since the outcome variable “classe” is an unordered factor variable, the expected out of sample error will correspond to the quantity: 1-accuracy in the cross validation data.
+
+The cross validation accuracy is 99.4%, therefore the expected out of sample error is 0.6% suggesting our model performs rather good.
+
+With an accuracy of 99.4% on the cross validation set, it is promising that our 20 test sample cases will be correctly classified or predicted.
+
+### Test dataset prediction
+
+In the end we will apply the random forest model to predicting 20 test cases loaded at the begining of the report.
+
+```{r}
+pred_test <- predict(modfit, test)
+pred_test
+```
+
+Then we will save the output and submit it following the instruction.
+
+```{r}
+answers <- as.vector(pred_test)
+pml_write_files = function(x) {
+    n = length(x)
+    for (i in 1:n) {
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+pml_write_files(answers)
+```
+
+#### References
+
+[^1]: Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
